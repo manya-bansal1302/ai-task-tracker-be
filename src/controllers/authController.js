@@ -7,9 +7,50 @@ const {
   hashRefreshToken,
 } = require("../utils/refreshToken");
 
+const cookieSameSite =
+  process.env.NODE_ENV === "production" ? "none" : "lax";
+
+function createOAuthState() {
+  const payload = `${Date.now()}.${crypto.randomBytes(32).toString("hex")}`;
+  const signature = crypto
+    .createHmac("sha256", process.env.SESSION_SECRET)
+    .update(payload)
+    .digest("base64url");
+
+  return `${payload}.${signature}`;
+}
+
+function isValidOAuthState(state) {
+  if (typeof state !== "string") return false;
+
+  const [issuedAt, nonce, signature, ...extra] = state.split(".");
+  const timestamp = Number(issuedAt);
+  if (
+    extra.length > 0 ||
+    !Number.isFinite(timestamp) ||
+    !nonce ||
+    !signature ||
+    Date.now() - timestamp < 0 ||
+    Date.now() - timestamp > 10 * 60 * 1000
+  ) {
+    return false;
+  }
+
+  const payload = `${issuedAt}.${nonce}`;
+  const expected = crypto
+    .createHmac("sha256", process.env.SESSION_SECRET)
+    .update(payload)
+    .digest();
+  const received = Buffer.from(signature, "base64url");
+
+  return (
+    received.length === expected.length &&
+    crypto.timingSafeEqual(received, expected)
+  );
+}
+
 function startGoogleAuth(req, res) {
-  const state = crypto.randomBytes(32).toString("hex");
-  req.session.oauthState = state;
+  const state = createOAuthState();
 
   const googleUrl = googleOAuthClient.generateAuthUrl({
     scope: ["openid", "email", "profile"],
@@ -27,12 +68,9 @@ async function finishGoogleSignIn(req, res) {
       return res.status(400).json({ message: "Missing code or state." });
     }
 
-    if (!req.session.oauthState || state !== req.session.oauthState) {
+    if (!isValidOAuthState(state)) {
       return res.status(400).json({ message: "Invalid OAuth state." });
     }
-
-    // The state is one-time use.
-    delete req.session.oauthState;
 
     // Exchange Google's temporary code for tokens.
     const { tokens } = await googleOAuthClient.getToken(code);
@@ -104,7 +142,7 @@ async function finishGoogleSignIn(req, res) {
     res.cookie("refreshToken", refreshToken, {
       httpOnly: true,
       secure: process.env.NODE_ENV === "production",
-      sameSite: "lax",
+      sameSite: cookieSameSite,
       maxAge: expiresAt.getTime() - Date.now(),
       path: "/",
     });
@@ -114,7 +152,7 @@ async function finishGoogleSignIn(req, res) {
     res.cookie("accessToken", token, {
       httpOnly: true,
       secure: process.env.NODE_ENV === "production",
-      sameSite: "lax",
+      sameSite: cookieSameSite,
       maxAge: 24 * 60 * 60 * 1000,
       path: "/",
     });
@@ -164,7 +202,7 @@ async function refreshAccessToken(req, res) {
       res.clearCookie("refreshToken", {
         httpOnly: true,
         secure: process.env.NODE_ENV === "production",
-        sameSite: "lax",
+        sameSite: cookieSameSite,
         path: "/",
       });
 
@@ -214,7 +252,7 @@ async function refreshAccessToken(req, res) {
     res.cookie("accessToken", newAccessToken, {
       httpOnly: true,
       secure: process.env.NODE_ENV === "production",
-      sameSite: "lax",
+      sameSite: cookieSameSite,
       maxAge: 15 * 60 * 1000,
       path: "/",
     });
@@ -222,7 +260,7 @@ async function refreshAccessToken(req, res) {
     res.cookie("refreshToken", newRefreshToken, {
       httpOnly: true,
       secure: process.env.NODE_ENV === "production",
-      sameSite: "lax",
+      sameSite: cookieSameSite,
       maxAge: expiresAt.getTime() - Date.now(),
       path: "/",
     });
@@ -281,14 +319,14 @@ async function logout(req, res) {
     res.clearCookie("accessToken", {
       httpOnly: true,
       secure: process.env.NODE_ENV === "production",
-      sameSite: "lax",
+      sameSite: cookieSameSite,
       path: "/",
     });
 
     res.clearCookie("refreshToken", {
       httpOnly: true,
       secure: process.env.NODE_ENV === "production",
-      sameSite: "lax",
+      sameSite: cookieSameSite,
       path: "/",
     });
 
