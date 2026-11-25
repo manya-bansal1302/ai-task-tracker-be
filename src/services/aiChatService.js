@@ -1,7 +1,7 @@
 const gemini = require("../config/gemini");
 
 const REFUSAL =
-  "I can help only with TaskPilot and the tasks in your account. Ask me about your tasks or how to use the app.";
+  "I’m here to help with TaskPilot and your tasks. Please ask me something related to the app.";
 
 async function answerTaskPilotChat(messages, tasks) {
   const today = new Date().toLocaleDateString("en-CA", {
